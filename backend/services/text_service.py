@@ -1,89 +1,106 @@
 import torch
-from transformers import GPT2LMHeadModel, GPT2TokenizerFast
-import numpy as np
+import torch.nn as nn
+from transformers import AutoTokenizer, AutoConfig, AutoModel, PreTrainedModel
+import re
+
+class DesklibAIDetectionModel(PreTrainedModel):
+    config_class = AutoConfig
+    _tied_weights_keys = []
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.model = AutoModel.from_config(config)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+        self.init_weights()
+
+    @property
+    def all_tied_weights_keys(self):
+        return {}
+
+    def forward(self, input_ids, attention_mask=None, labels=None):
+        outputs = self.model(input_ids, attention_mask=attention_mask)
+        last_hidden_state = outputs[0]
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, dim=1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(dim=1), min=1e-9)
+        pooled_output = sum_embeddings / sum_mask
+        logits = self.classifier(pooled_output)
+        loss = None
+        if labels is not None:
+            loss_fct = nn.BCEWithLogitsLoss()
+            loss = loss_fct(logits.view(-1), labels.float())
+        output = {"logits": logits}
+        if loss is not None:
+            output["loss"] = loss
+        return output
 
 print("Loading text detection model...")
-tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-model = GPT2LMHeadModel.from_pretrained("gpt2")
+MODEL_NAME = "desklib/ai-text-detector-v1.01"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+model = DesklibAIDetectionModel.from_pretrained(MODEL_NAME)
+model.to(device)
 model.eval()
 print("Text detection model loaded!")
 
-def calculate_perplexity(text: str) -> float:
-    encodings = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-    input_ids = encodings.input_ids
-
+def predict_text(text: str, max_len: int = 768) -> float:
+    encoded = tokenizer(
+        text,
+        padding="max_length",
+        truncation=True,
+        max_length=max_len,
+        return_tensors="pt"
+    )
+    input_ids = encoded["input_ids"].to(device)
+    attention_mask = encoded["attention_mask"].to(device)
     with torch.no_grad():
-        outputs = model(input_ids, labels=input_ids)
-        loss = outputs.loss
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        probability = torch.sigmoid(outputs["logits"]).item()
+    return round(probability, 4)
 
-    return torch.exp(loss).item()
+def get_verdict(ai_score: float) -> tuple:
+    if ai_score < 0.40:
+        return "Likely Human Written", "green"
+    elif ai_score < 0.70:
+        return "Uncertain - May Contain AI", "yellow"
+    else:
+        return "Likely AI Written", "red"
 
-def calculate_burstiness(text: str) -> float:
-    sentences = [s.strip() for s in text.replace("!", ".").replace("?", ".").split(".") if len(s.strip()) > 10]
-    if len(sentences) < 3:
-        return 0.0
-    lengths = [len(s.split()) for s in sentences]
-    mean = np.mean(lengths)
-    std = np.std(lengths)
-    if mean == 0:
-        return 0.0
-    return std / mean
+def split_sentences(text: str) -> list:
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s.strip() for s in sentences if len(s.strip()) > 20]
 
 def detect_ai_text(text: str) -> dict:
     try:
         if len(text.strip()) < 100:
             return {
-                "error": "Text too short. Please provide at least 100 characters for accurate detection."
+                "error": "Text too short. Please provide at least 100 characters."
             }
 
-        perplexity = calculate_perplexity(text)
-        burstiness = calculate_burstiness(text)
-
-        # Perplexity scoring
-        # AI text typically has perplexity < 30
-        # Human text typically has perplexity > 50
-        if perplexity < 20:
-            perplexity_ai_score = 0.95
-        elif perplexity < 30:
-            perplexity_ai_score = 0.85
-        elif perplexity < 45:
-            perplexity_ai_score = 0.65
-        elif perplexity < 60:
-            perplexity_ai_score = 0.40
-        elif perplexity < 80:
-            perplexity_ai_score = 0.20
-        else:
-            perplexity_ai_score = 0.10
-
-        # Burstiness scoring
-        # AI text is uniform (low burstiness < 0.3)
-        # Human text varies more (burstiness > 0.5)
-        if burstiness < 0.2:
-            burstiness_ai_score = 0.90
-        elif burstiness < 0.35:
-            burstiness_ai_score = 0.70
-        elif burstiness < 0.50:
-            burstiness_ai_score = 0.45
-        elif burstiness < 0.70:
-            burstiness_ai_score = 0.25
-        else:
-            burstiness_ai_score = 0.10
-
-        # Combined score — perplexity weighted more heavily
-        ai_score = (perplexity_ai_score * 0.65) + (burstiness_ai_score * 0.35)
+        ai_score = predict_text(text)
         real_score = 1 - ai_score
         confidence = round(ai_score * 100, 2)
+        verdict, verdict_color = get_verdict(ai_score)
 
-        # Three tier verdict
-        if ai_score < 0.40:
-            verdict = "Likely Human Written"
-            verdict_color = "green"
-        elif ai_score < 0.70:
-            verdict = "Uncertain — May Contain AI"
-            verdict_color = "yellow"
-        else:
-            verdict = "Likely AI Written"
-            verdict_color = "red"
+        sentences = split_sentences(text)
+        sentence_results = []
+        for sentence in sentences:
+            score = predict_text(sentence)
+            if score < 0.40:
+                label = "human"
+                color = "green"
+            elif score < 0.70:
+                label = "mixed"
+                color = "yellow"
+            else:
+                label = "ai"
+                color = "red"
+            sentence_results.append({
+                "sentence": sentence,
+                "ai_score": score,
+                "label": label,
+                "color": color
+            })
 
         return {
             "verdict": verdict,
@@ -91,13 +108,8 @@ def detect_ai_text(text: str) -> dict:
             "confidence": confidence,
             "ai_score": round(ai_score, 4),
             "real_score": round(real_score, 4),
-            "signals": {
-                "perplexity": round(perplexity, 2),
-                "burstiness": round(burstiness, 4),
-                "perplexity_note": "Lower = more AI-like",
-                "burstiness_note": "Lower = more uniform = more AI-like"
-            },
-            "characters_analyzed": len(text[:512]),
+            "sentences": sentence_results,
+            "characters_analyzed": len(text[:768]),
             "disclaimer": "Results are probabilistic. Always apply human judgment."
         }
 
