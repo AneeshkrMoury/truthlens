@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from services.image_service import detect_ai_image
 
 app = FastAPI(
     title="TruthLens API",
@@ -22,3 +23,13 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy", "version": "1.0.0"}
+
+@app.post("/detect/image")
+async def detect_image(file: UploadFile = File(...)):
+    contents = await file.read()
+    result = detect_ai_image(contents)
+    return {
+        "filename": file.filename,
+        "content_type": file.content_type,
+        "result": result
+    }
