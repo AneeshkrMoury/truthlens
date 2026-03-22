@@ -227,7 +227,7 @@ export default function Home() {
         if (!imageFile) return;
           const formData = new FormData();
           formData.append("file", imageFile);
-          const res = await fetch("https://aneeshkrmourya-truthlens-backend.hf.space", { method: "POST", body: formData });
+          const res = await fetch("https://aneeshkrmourya-truthlens-backend.hf.space/detect/image", { method: "POST", body: formData });
           const data = await res.json();
           setImageResult(data.result);
 
@@ -243,7 +243,7 @@ export default function Home() {
         if (!textInput.trim()) return;
           const formData = new FormData();
           formData.append("text", textInput);
-          const res = await fetch("https://aneeshkrmourya-truthlens-backend.hf.space", { method: "POST", body: formData });
+          const res = await fetch("https://aneeshkrmourya-truthlens-backend.hf.space/detect/text", { method: "POST", body: formData });
           const data = await res.json();
           setTextResult(data.result);
 
