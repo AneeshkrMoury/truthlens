@@ -212,21 +212,49 @@ export default function Home() {
     setTextResult(null);
     setError(null);
     setFeedback(null);
+
+  // Track analysis event in GA4
+    if (typeof window !== "undefined" && (window as any).gtag) {
+      (window as any).gtag("event", "analyze_content", {
+        event_category: "Detection",
+        event_label: activeTab === "text" ? "Text Detection" : "Image Detection",
+        value: activeTab === "text" ? textInput.length : 1,
+      });
+    }
+
     try {
       if (activeTab === "image") {
         if (!imageFile) return;
-        const formData = new FormData();
-        formData.append("file", imageFile);
-        const res = await fetch("http://localhost:8000/detect/image", { method: "POST", body: formData });
-        const data = await res.json();
-        setImageResult(data.result);
+          const formData = new FormData();
+          formData.append("file", imageFile);
+          const res = await fetch("http://localhost:8000/detect/image", { method: "POST", body: formData });
+          const data = await res.json();
+          setImageResult(data.result);
+
+      // Track result
+            if (typeof window !== "undefined" && (window as any).gtag) {
+              (window as any).gtag("event", "detection_result", {
+              event_category: "Detection",
+              event_label: "Image Result",
+              value: data.result?.confidence || 0,
+            });
+         }
       } else {
         if (!textInput.trim()) return;
-        const formData = new FormData();
-        formData.append("text", textInput);
-        const res = await fetch("http://localhost:8000/detect/text", { method: "POST", body: formData });
-        const data = await res.json();
-        setTextResult(data.result);
+          const formData = new FormData();
+          formData.append("text", textInput);
+          const res = await fetch("http://localhost:8000/detect/text", { method: "POST", body: formData });
+          const data = await res.json();
+          setTextResult(data.result);
+
+      // Track result
+        if (typeof window !== "undefined" && (window as any).gtag) {
+          (window as any).gtag("event", "detection_result", {
+          event_category: "Detection",
+          event_label: "Text Result",
+          value: data.result?.confidence || 0,
+          });
+        }
       }
     } catch {
       setError("Could not connect to the detection server. Make sure the backend is running.");
