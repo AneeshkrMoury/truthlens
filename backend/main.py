@@ -1,6 +1,8 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Form
 from services.image_service import detect_ai_image
+from services.text_service import detect_ai_text
 
 app = FastAPI(
     title="TruthLens API",
@@ -31,5 +33,13 @@ async def detect_image(file: UploadFile = File(...)):
     return {
         "filename": file.filename,
         "content_type": file.content_type,
+        "result": result
+    }
+
+@app.post("/detect/text")
+async def detect_text(text: str = Form(...)):
+    result = detect_ai_text(text)
+    return {
+        "characters": len(text),
         "result": result
     }
