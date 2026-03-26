@@ -68,7 +68,7 @@ function AnimatedCounter({ target, suffix = "", duration = 2000 }: { target: num
   return <span ref={ref}>{count}{suffix}</span>;
 }
 
-function LoadingOverlay() {
+function LoadingOverlay({ wakingUp }: { wakingUp: boolean }) {
   const [frame, setFrame] = useState(0);
   const messages = ["Scanning content...", "Analyzing patterns...", "Running detection...", "Calculating results..."];
   useEffect(() => {
@@ -76,7 +76,7 @@ function LoadingOverlay() {
     return () => clearInterval(i);
   }, []);
   return (
-    <div className="absolute inset-0 bg-gray-950/95 backdrop-blur-sm rounded-2xl z-50 flex flex-col items-center justify-center gap-6">
+    <div className="absolute inset-0 bg-[#080B14]/95 backdrop-blur-sm rounded-2xl z-50 flex flex-col items-center justify-center gap-6">
       <div className="relative w-20 h-20">
         <div className="absolute inset-0 rounded-full border-2 border-violet-500/20"></div>
         <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 animate-spin"></div>
@@ -86,9 +86,26 @@ function LoadingOverlay() {
           <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
         </div>
       </div>
-      <div className="text-center">
-        <p className={`font-semibold text-sm ${gradientText}`}>TruthLens</p>
-        <p className="text-gray-400 text-xs mt-1">{messages[frame]}</p>
+      <div className="text-center px-6">
+        {wakingUp ? (
+          <>
+            <p className="font-semibold text-sm text-amber-400">Waking up the server...</p>
+            <p className="text-gray-400 text-xs mt-2 leading-relaxed">
+              The detection server was sleeping to save resources.<br/>
+              This happens once and takes 30-60 seconds. Hang tight!
+            </p>
+            <div className="flex items-center justify-center gap-1 mt-3">
+              {[0,1,2].map(i => (
+                <div key={i} className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }}></div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="font-semibold text-sm" style={{ background: "linear-gradient(135deg, #a78bfa, #67e8f9)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>TruthLens</p>
+            <p className="text-gray-400 text-xs mt-1">{messages[frame]}</p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -190,6 +207,7 @@ export default function Home() {
   const [showContact, setShowContact] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [wakingUp, setWakingUp] = useState(false);
 
   const wordCount = textInput.trim() === "" ? 0 : textInput.trim().split(/\s+/).length;
   const charCount = textInput.length;
@@ -212,6 +230,7 @@ export default function Home() {
     setTextResult(null);
     setError(null);
     setFeedback(null);
+    setWakingUp(false);
 
   // Track analysis event in GA4
     if (typeof window !== "undefined" && (window as any).gtag) {
@@ -222,6 +241,11 @@ export default function Home() {
       });
     }
 
+  // Set a timer — if no response in 5 seconds show waking up message
+    const wakeTimer = setTimeout(() => {
+      setWakingUp(true);
+    }, 5000);
+
     try {
       if (activeTab === "image") {
         if (!imageFile) return;
@@ -230,38 +254,36 @@ export default function Home() {
           const res = await fetch("https://aneeshkrmourya-truthlens-backend.hf.space/detect/image", { method: "POST", body: formData });
           const data = await res.json();
           setImageResult(data.result);
-
-      // Track result
-            if (typeof window !== "undefined" && (window as any).gtag) {
-              (window as any).gtag("event", "detection_result", {
-              event_category: "Detection",
-              event_label: "Image Result",
-              value: data.result?.confidence || 0,
+          if (typeof window !== "undefined" && (window as any).gtag) {
+            (window as any).gtag("event", "detection_result", {
+            event_category: "Detection",
+            event_label: "Image Result",
+            value: data.result?.confidence || 0,
             });
-         }
-      } else {
+          }
+        } else {
         if (!textInput.trim()) return;
           const formData = new FormData();
           formData.append("text", textInput);
           const res = await fetch("https://aneeshkrmourya-truthlens-backend.hf.space/detect/text", { method: "POST", body: formData });
           const data = await res.json();
           setTextResult(data.result);
-
-      // Track result
-        if (typeof window !== "undefined" && (window as any).gtag) {
-          (window as any).gtag("event", "detection_result", {
-          event_category: "Detection",
-          event_label: "Text Result",
-          value: data.result?.confidence || 0,
-          });
+          if (typeof window !== "undefined" && (window as any).gtag) {
+            (window as any).gtag("event", "detection_result", {
+            event_category: "Detection",
+            event_label: "Text Result",
+            value: data.result?.confidence || 0,
+            });
+          }
         }
+      } catch {
+        setError("Could not connect to the detection server. Please try again in a moment.");
+      } finally {
+        clearTimeout(wakeTimer);
+        setWakingUp(false);
+        setLoading(false);
       }
-    } catch {
-      setError("Could not connect to the detection server. Make sure the backend is running.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
   const getVerdictStyle = (color: string) => {
     if (color === "green") return "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400";
@@ -425,7 +447,7 @@ export default function Home() {
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Input Card */}
           <div className="flex-1 rounded-2xl p-6 relative gradient-border glow-violet bg-[#0d1117]">
-            {loading && <LoadingOverlay />}
+            {loading && <LoadingOverlay wakingUp={wakingUp} />}
 
             {activeTab === "text" && (
               <div className="flex flex-col gap-3">
